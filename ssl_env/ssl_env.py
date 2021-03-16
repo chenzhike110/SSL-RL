@@ -85,8 +85,8 @@ class RoboCupEnv(gym.Env):
         self.seed()
         self.reset()
 
-    """ action is [vx, vy, w] """
-    def step(self, action=[0,0,0]):
+    """ action is [vx, vy, w. kick] """
+    def step(self, action=[0,0,0,0]):
         # transfer from normalized action to normal action
         dvx = self.max_v*action[0] - self.robot_vx
         dvy = self.max_v*action[1] - self.robot_vy
@@ -174,7 +174,7 @@ class RoboCupEnv(gym.Env):
             #else:
             #    r_on_dribble = 0.0
         else:
-            r_on_dribble = 0.0  
+            r_on_dribble = -0.01  
         
         #total reward
         self.reward = r_on_dribble
