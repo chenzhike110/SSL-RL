@@ -19,27 +19,39 @@ import proto.zss_cmd_pb2 as zss
 class VisionModule:
     def __init__(self, MULTI_GROUP, VISION_PORT, STATUS_PORT, SENDERIP = '0.0.0.0'):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        self.status_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        self.status_sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-        self.status_sock.bind(('127.0.0.1',STATUS_PORT))
-        # self.status_sock.setsockopt(socket.IPPROTO_IP,
-        #     socket.IP_ADD_MEMBERSHIP,
-        #     socket.inet_aton(MULTI_GROUP) + socket.inet_aton(SENDERIP))
-        self.status_sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-        self.status_sock.settimeout(0.5)
+        self.sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        self.sock.bind((SENDERIP,VISION_PORT))
         self.sock.setsockopt(socket.IPPROTO_IP,
             socket.IP_ADD_MEMBERSHIP,
             socket.inet_aton(MULTI_GROUP) + socket.inet_aton(SENDERIP))
-        self.sock.bind((SENDERIP,VISION_PORT))
+        
+        
+        # self.status_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        # self.status_sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        # self.status_sock.bind(('127.0.0.1',STATUS_PORT))
+        # self.status_sock.setsockopt(socket.IPPROTO_IP,socket.IP_ADD_MEMBERSHIP,socket.inet_aton(MULTI_GROUP) + socket.inet_aton(SENDERIP))
+        # self.status_sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        # self.status_sock.settimeout(0.5)
+
+        self.status_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self.status_sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        self.status_sock.bind((SENDERIP,STATUS_PORT))
+        self.status_sock.setsockopt(socket.IPPROTO_IP,
+            socket.IP_ADD_MEMBERSHIP,
+            socket.inet_aton(MULTI_GROUP) + socket.inet_aton(SENDERIP))
         
 
         self.robot_info = [0, 0, 0, 0]
-        self.ball_info = [0, 0]
+        self.ball_info = [0, 0, 0, 0]
 
     def receive(self):
-        data, addr = self.sock.recvfrom(4096)
-        sleep(0.001) # wait for reading
-        # robot_Data, addr = self.status_sock.recvfrom(4096)
+        print('receive')
+        data, addr = self.sock.recvfrom(1024)
+        # print(data)
+        # sleep(0.001) # wait for reading
+        # print('receive2')
+        robot_Data, addr = self.status_sock.recvfrom(1024)
+        print(robot_Data)
         robot_Data = None
         return data, robot_Data
 
@@ -65,8 +77,11 @@ class VisionModule:
             ball_max_conf = 0
             for ball in balls:
                 if ball.confidence >= ball_max_conf:
+                    self.ball_info[2] = ball.x - self.ball_info[0]
+                    self.ball_info[3] = ball.y - self.ball_info[1]
                     self.ball_info[0] = ball.x/1000.0
                     self.ball_info[1] = ball.y/1000.0
+
             
             if math.sqrt((self.ball_info[0]-self.robot_info[0])**2+(self.ball_info[1]-self.robot_info[1])**2) < 0.11:
                 self.robot_info[3] = 1
