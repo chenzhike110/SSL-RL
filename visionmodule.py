@@ -42,7 +42,7 @@ class VisionModule:
         self.status_sock.settimeout(0.2)
 
         self.robot_info = [0, 0, 0, 0]
-        self.ball_info = [0, 0, 0, 0]
+        self.ball_info = [0, 0]
 
     def receive(self):
         print('receive')
@@ -52,6 +52,7 @@ class VisionModule:
         # print('receive2')
         try:
             robot_Data, addr = self.status_sock.recvfrom(1024)
+            print('receive2')
         except:         
             robot_Data = None
         return data, robot_Data
@@ -78,16 +79,12 @@ class VisionModule:
             ball_max_conf = 0
             for ball in balls:
                 if ball.confidence >= ball_max_conf:
-                    self.ball_info[2] = ball.x - self.ball_info[0]
-                    self.ball_info[3] = ball.y - self.ball_info[1]
                     self.ball_info[0] = ball.x/1000.0
                     self.ball_info[1] = ball.y/1000.0
 
-            
-            if math.sqrt((self.ball_info[0]-self.robot_info[0])**2+(self.ball_info[1]-self.robot_info[1])**2) < 0.11:
-                self.robot_info[3] = 1
         except:
             print("vision error")
+            pass
                 #print('Ball', ball.confidence)
         package = zss.Robot_Status
         try:
@@ -97,6 +94,7 @@ class VisionModule:
                     self.robot_info[3] = robot.indrared
         except:
             print("status error")
+            pass
   
 if __name__ == '__main__':
     MULTI_GROUP = '224.5.23.2'

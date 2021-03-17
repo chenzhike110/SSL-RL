@@ -6,8 +6,9 @@
 @change log:
 2019.2.24: correct observation_space dim
 """
+import sys
+sys.path.append(".")
 from math import atan2
-from os import stat
 from random import random
 from gym.logger import info
 # from torch._C import Value
@@ -24,7 +25,10 @@ class GrsimEnv(gym.Env):
         'video.frames_per_second': 60
     }
 
-    def __init__(self, ROBOT_ID, train, targetLine=None):
+    def __init__(self):
+        ROBOT_ID = 6
+        train = True
+        targetLine = [[4.5, 0.5],[4.5, -0.5]]
         self.MULTI_GROUP = '224.5.23.2'
         self.VISION_PORT = 10094
         self.ACTION_IP = '127.0.0.1' # local host grSim
@@ -42,23 +46,17 @@ class GrsimEnv(gym.Env):
         # self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
         self.targetLine = targetLine
 
-    def in_range(self, state):
-        if state[0] < -self.width or state[0] > self.width:
-            return False
-        if state[1] < -self.height or state[1] > self.height:
-            return False
-        return True
-
     """ action is [w. kick] """
     def step(self, action=[0,0]):
         reward = -0.1
-        if action[1] > 0 and self.vision.robot_info[3]!=1:
+        if self.vision.robot_info[3]!=1:
             done = True
             reward -= 0.5
-        if action[1] == 1:
+        if action[1] > 0:
             kp = 5
         else:
             kp = 0
+        self.vision.robot_info[-1] = action[0]
         self.actionSender.send_action(robot_num=self.ROBOT_ID, vx=0, vy=0, w=action[0], kp=kp)
         self.vision.get_info(self.ROBOT_ID)
         state = [self.vision.robot_info, self.vision.ball_info]
@@ -66,40 +64,32 @@ class GrsimEnv(gym.Env):
         '''
             kick ball task
         '''
-        if action[1] == 1:
+        if action[1] > 0:
             done = True
             reward = self.get_reward()
-            # if 
-        # if not self.in_range(state[0]) or not self.in_range(state[1]):
-        #     done = True
-        '''
-
-        '''
         return state, reward, done, info
     
     def get_reward(self):
-        ball_pos = [self.vision.ball_info[0], self.vision.ball_info[1]]
-        self.vision.get_info(self.ROBOT_ID)
-        theta_1 = atan2(self.targetLine[0][1]-ball_pos[1], self.targetLine[0][0]-ball_pos[0])
-        theta_2 = atan2(self.targetLine[1][1]-ball_pos[1], self.targetLine[1][0]-ball_pos[0])
-        if self.in_range(atan2(self.vision.ball_info[3],self.vision.ball_info[2]), theta_1, theta_2):
-            reward = 100
-        else:
-            reward = -100
-        return reward
-
-    def in_range(self, value, set_1, set_2):
-        if value < set_1 and value > set_2:
-            return True
-        if value > set_1 and value < set_2:
-            return True
-        return False
+        ball_pos = self.vision.ball_info
+        while True:
+            self.vision.get_info(self.ROBOT_ID)
+            if ball_pos[0] == self.vision.ball_info[0] and ball_pos[1] == self.vision.ball_info[1]:
+                print("ball static!")
+                return -100
+            ball_pos = self.vision.ball_info
+            if ball_pos[1] >= self.height or ball_pos[1] <= -self.height or ball_pos[0] < -self.width:
+                print("ball outside!")
+                return -100
+            if ball_pos[0] >= self.width and (ball_pos[1] >= self.targetLine[1][1] and ball_pos[1] <= self.targetLine[0][1]):
+                print("goal!!!")
+                return 100
 
     def reset(self):
         if self.train:
             self.actionSender.send_reset(self.ROBOT_ID, 1)
         else:
             self.actionSender.send_reset(self.ROBOT_ID, 0)
+        time.sleep(0.5)
         self.vision.get_info(self.ROBOT_ID)
         state = [self.vision.robot_info, self.vision.ball_info[:2]]
         if state[0][3] != 1:
@@ -107,7 +97,7 @@ class GrsimEnv(gym.Env):
         return state
 
 if __name__ == "__main__":
-    env = GrsimEnv(6, True, [[4.5, 0.5],[4.5, -0.5]])
+    env = GrsimEnv()
     observate = env.reset()
     time.sleep(1)
     done = False

@@ -1,4 +1,21 @@
 import torch
+from torch import nn
+import argparse
+import os
+from math import atan2,sin,cos
+import numpy as np
+import gym
+from tensorboardX import SummaryWriter
+import my_env
+import torch.nn.functional as F
+
+writer = SummaryWriter(log_dir="log")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Linear') != -1:
+        torch.nn.init.xavier_normal_(m.weight)
 
 class ReplayBuffer(object):
     def __init__(self):
@@ -165,4 +182,125 @@ class TD3(object):
         self.actor.load_state_dict(torch.load('%s/%s_actor.pkl' % (directory, filename)))
         self.critic.load_state_dict(torch.load('%s/%s_critic.pkl' % (directory, filename)))
 
-if __name__ == "__main__"
+def get_state(obs, targetLine):
+    robot_state = obs[0]
+    ball_pos = obs[1]
+    theta_1 = atan2(targetLine[0][1]-ball_pos[1], targetLine[0][0]-ball_pos[0])
+    theta_2 = atan2(targetLine[1][1]-ball_pos[1], targetLine[1][0]-ball_pos[0])
+    v_w = robot_state[-1]
+    ball_to_robot = atan2(ball_pos[0]-robot_state[0], ball_pos[1]-robot_state[1])
+    
+    return sin(theta_1), cos(theta_1), sin(theta_2), cos(theta_2), sin(ball_to_robot), cos(ball_to_robot), robot_state[-2], v_w
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env_name", default="RoboCup-v2")			# OpenAI gym environment name
+    parser.add_argument("--seed", default=3, type=int)					# Sets Gym, PyTorch and Numpy seeds
+    parser.add_argument("--start_timesteps", default=1e4, type=int)		# How many time steps purely random policy is run for
+    #parser.add_argument("--eval_freq", default=5e3, type=float)			# How often (time steps) we evaluate
+    parser.add_argument("--max_timesteps", default=1e6, type=float)		# Max time steps to run environment for
+    #parser.add_argument("--save_models", action="store_true")			# Whether or not models are saved
+    parser.add_argument("--expl_noise", default=0.1, type=float)		# Std of Gaussian exploration noise
+    parser.add_argument("--max_expl_noise", default=0.5, type=float)    # Std of Gaussian exploration noise
+    parser.add_argument("--min_expl_noise", default=0.1, type=float)    # Std of Gaussian exploration noise
+    parser.add_argument("--batch_size", default=100, type=int)			# Batch size for both actor and critic
+    parser.add_argument("--discount", default=0.99, type=float)			# Discount factor
+    parser.add_argument("--tau", default=0.005, type=float)				# Target network update rate
+    parser.add_argument("--policy_noise", default=0.2, type=float)		# Noise added to target policy during critic update
+    parser.add_argument("--noise_clip", default=0.5, type=float)		# Range to clip target policy noise
+    parser.add_argument("--policy_freq", default=2, type=int)			# Frequency of delayed policy updates
+    parser.add_argument("--load_model", default=False, type=bool)
+    args = parser.parse_args()
+
+    if not os.path.exists("./shootModule"):
+        os.mkdir("./shootModule")
+    
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+    env = gym.make(args.env_name)
+
+    state_dim = 2
+    action_dim = 2
+    max_action = np.array([3,1])
+    min_action = np.array([-3,-1])
+    ACTION_BOUND = [min_action, max_action]
+    VAR_MIN = args.min_expl_noise 
+    var = args.max_expl_noise
+
+    shootModule = TD3(8, 2, [3,1])
+    file_name = "TD3_%s_%s" % (args.env_name, str(args.seed))
+    if args.load_model:
+        try:
+            shootModule.load(filename=file_name, directory="./shootModule")
+            print("load model")
+        except Exception as err:
+            print(err)
+    
+    memory = ReplayBuffer()
+    total_timesteps = 0
+    episode_num = 0
+    done = True
+    reward = 0
+    episode_reward = 0
+    episode_timesteps = 0
+    success = []
+    target_line = [[4.5, 0.5],[4.5, -0.5]]
+
+    '''
+        train epoch
+    '''
+    while total_timesteps < args.max_timesteps:
+        if done:
+            # print success rate
+            if reward > 80:
+                success.append(1)
+            else: success.append(0)
+            if episode_num % 20 == 0 and episode_num >= 100:
+                print('Successful Rate: ', sum(success[-100:]), '%')
+                writer.add_scalar('success_rate', sum(success[-100:]), episode_num)
+            if episode_num != 0:
+                writer.add_scalar('episode_reward', episode_reward, episode_num)
+            
+            # Reset environment
+            obs = env.reset()
+            obs = get_state(obs, target_line)
+            
+            if total_timesteps != 0:
+                #print(("Total T: %d Episode Num: %d Episode T: %d Reward: %f") % (total_timesteps, episode_num, episode_timesteps, episode_reward))
+                shootModule.train(memory, episode_timesteps, args.batch_size, args.discount, args.tau, args.policy_noise, args.noise_clip, args.policy_freq)
+            
+            done = False
+            episode_reward = 0
+            episode_timesteps = 0
+            episode_num += 1
+            
+            if episode_num % 50 == 0:
+                shootModule.save("%s" % (file_name), directory="./pytorch_models")
+                print('Model saved !')
+                
+        action = shootModule.select_action(np.array(obs))
+        #if args.expl_noise != 0: 
+        #    action = (action + np.random.normal(0, args.expl_noise, size=env.action_space.shape[0])).clip(env.action_space.low, env.action_space.high)
+        action = np.clip(np.random.normal(action, var), *ACTION_BOUND)
+        if total_timesteps>10000:
+            var = max([var*.9999, VAR_MIN])
+
+        # Perform action
+        temp = env.step(action)
+        new_obs, reward, done, _ = temp
+        new_obs = get_state(new_obs, target_line)
+
+        # env.render()
+        done_bool = 0 if episode_timesteps + 1 == env._max_episode_steps else float(done)
+        episode_reward += reward
+        # Store data in replay buffer
+        memory.add((obs, new_obs, action, reward, done_bool))
+
+        obs = new_obs
+        episode_timesteps += 1
+        total_timesteps += 1
+	
+    #end of while 
+    policy.save("%s" % (file_name), directory="./pytorch_models")
+            
